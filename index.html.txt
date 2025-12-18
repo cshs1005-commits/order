@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>點餐系統（擁有者模式）</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f5f5f5; padding:20px; }
+    body.owner { background:#e8f5e9; }
+    h1 { text-align:center; }
+    table { width:100%; border-collapse: collapse; background:#fff; }
+    th, td { border:1px solid #ccc; padding:8px; text-align:center; }
+    th { background:#eee; }
+    input, select { width:90%; padding:4px; }
+    input:disabled { background:#f0f0f0; color:#888; }
+    .btn { padding:6px 12px; cursor:pointer; margin:4px; }
+    .btn-add { margin:10px 0; }
+    .total { font-size:1.2em; text-align:right; margin-top:10px; }
+    .mode-box { text-align:center; margin-bottom:12px; padding:10px; border-radius:8px; font-weight:bold; }
+    .mode-customer { background:#ffecec; color:#b00000; }
+    .mode-owner { background:#e0f2ff; color:#005999; }
+    .login-box { text-align:center; margin-bottom:10px; }
+  </style>
+</head>
+<body>
+
+<h1>🍔 點餐系統</h1>
+
+<!-- 座號 -->
+<div style="text-align:center; margin-bottom:12px;">
+  <label>座號：</label>
+  <select id="seatSelect"></select>
+</div>
+
+<!-- 擁有者登入 -->
+<div class="login-box" id="loginBox">
+  <input type="password" id="passwordInput" placeholder="擁有者密碼" />
+  <button class="btn" onclick="loginOwner()">登入擁有者</button>
+</div>
+
+<div id="modeBox" class="mode-box mode-customer">
+  <span id="modeText">目前模式：顧客</span>
+  <button id="logoutBtn" class="btn" style="display:none" onclick="logoutOwner()">登出</button>
+</div>
+
+<table id="menuTable">
+  <thead>
+    <tr>
+      <th>餐點</th>
+      <th>價格</th>
+      <th>數量</th>
+      <th>小計</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<button class="btn btn-add" onclick="addRow()">➕ 新增餐點</button>
+
+<div class="total">總金額：<span id="totalPrice">0</span> 元</div>
+
+<button class="btn" onclick="sendOrder()">📤 送出訂單</button>
+
+<script>
+  const OWNER_PASSWORD = '1';
+  const GOOGLE_SHEET_WEBHOOK = 'https://script.google.com/macros/s/AKfycbyu85FHTfgQLmepEwS0N6hFnSVIQ49OfIOW3P7bT_i4j0OG1rN059xsF7RTjO8ZAx_k/exec';
+  let isOwner = false;
+
+  function initSeats() {
+    const s = document.getElementById('seatSelect');
+    s.innerHTML = '<option value="">請選座號</option>';
+    for (let i=1;i<=35;i++) {
+      const o = document.createElement('option');
+      o.value = i;
+      o.textContent = i + ' 號';
+      s.appendChild(o);
+    }
+  }
+
+  function loginOwner() {
+    if (document.getElementById('passwordInput').value !== OWNER_PASSWORD) {
+      alert('密碼錯誤'); return;
+    }
+    isOwner = true;
+    updateMode();
+  }
+
+  function logoutOwner() {
+    isOwner = false;
+    updateMode();
+  }
+
+  function updateMode() {
+    document.body.classList.toggle('owner', isOwner);
+    document.getElementById('loginBox').style.display = isOwner ? 'none' : 'block';
+    document.getElementById('logoutBtn').style.display = isOwner ? 'inline-block' : 'none';
+    document.getElementById('modeText').innerText = isOwner ? '目前模式：擁有者' : '目前模式：顧客';
+
+    document.querySelectorAll('#menuTable tbody tr').forEach(r => {
+      r.children[0].querySelector('input').disabled = !isOwner;
+      r.children[1].querySelector('input').disabled = !isOwner;
+      r.querySelector('button').style.display = isOwner ? 'inline-block' : 'none';
+    });
+    document.querySelector('.btn-add').style.display = isOwner ? 'inline-block' : 'none';
+  }
+
+  function addRow(force = false) {
+    if (!isOwner && !force) return;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" value="餐點"></td>
+      <td><input type="number" value="0"></td>
+      <td><input type="number" value="0" min="0"></td>
+      <td class="subtotal">0</td>
+      <td><button class="btn" onclick="this.closest('tr').remove();updateTotal();">刪除</button></td>`;
+    document.querySelector('#menuTable tbody').appendChild(tr);
+    updateMode();
+  }
+
+  function updateTotal() {
+    let total = 0;
+    document.querySelectorAll('#menuTable tbody tr').forEach(r => {
+      const price = +r.children[1].querySelector('input').value || 0;
+      const qty = +r.children[2].querySelector('input').value || 0;
+      const sub = price * qty;
+      r.querySelector('.subtotal').innerText = sub;
+      total += sub;
+    });
+    document.getElementById('totalPrice').innerText = total;
+  }
+
+  function sendOrder() {
+    const seat = document.getElementById('seatSelect').value;
+    if (!seat) { alert('請選座號'); return; }
+
+    const items = [];
+    document.querySelectorAll('#menuTable tbody tr').forEach(r => {
+      const name = r.children[0].querySelector('input').value;
+      const price = +r.children[1].querySelector('input').value || 0;
+      const qty = +r.children[2].querySelector('input').value || 0;
+      if (qty>0) items.push({name, price, qty, subtotal: price*qty});
+    });
+    if (!items.length) { alert('尚未點餐'); return; }
+
+    const data = {
+      seatNo: seat,
+      orderNo: 'OD' + Date.now(),
+      time: new Date().toLocaleString(),
+      total: document.getElementById('totalPrice').innerText,
+      items
+    };
+
+    fetch(GOOGLE_SHEET_WEBHOOK, {
+      method: 'POST',
+      mode: 'no-cors', // ⭐ 避免瀏覽器阻擋（GAS 必備）
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(()=>{
+      alert('訂單送出完成');
+    }).catch(()=>{
+      alert('送出失敗，請確認 App Script');
+    });
+  }
+
+  document.addEventListener('input', updateTotal);
+  initSeats();
+  addRow(true);
+  updateMode();
+</script>
+
+</body>
+</html>
